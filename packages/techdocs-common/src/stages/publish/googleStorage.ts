@@ -25,7 +25,7 @@ import JSON5 from 'json5';
 import createLimiter from 'p-limit';
 import path from 'path';
 import { Logger } from 'winston';
-import { getFileTreeRecursively, getHeadersForFileExtension } from './helpers';
+import { getFileTreeRecursively, getHeadersForFileExtension, getStaleFiles, getCloudPathForLocalPath } from './helpers';
 import {
   PublisherBase,
   PublishRequest,
@@ -107,15 +107,46 @@ export class GoogleGCSPublish implements PublisherBase {
     }
   }
 
+  private async
+
   /**
    * Upload all the files from the generated `directory` to the GCS bucket.
    * Directory structure used in the bucket is - entityNamespace/entityKind/entityName/index.html
    */
   async publish({ entity, directory }: PublishRequest): Promise<void> {
+    const bucket = this.storageClient.bucket(this.bucketName);
+
+    // First, retrieve a list of all individual files in currently existing
+    const existingFiles = await bucket.getFiles({ prefix: 'the/folder' })
+
+    // Then, merge new files into the same folder
+    const allFilesToUpload = await getFileTreeRecursively(directory);
+  
+
+
+    const bulkStorageOperation = async (operation: (arg: unknown) => Promise<unknown>, argument: any[], { concurrencyLimit }: { concurrencyLimit: number }) => {
+      const limiter = createLimiter(concurrencyLimit);
+      await Promise.all(argument.map(a => limiter(arg => {
+        return operation(arg);
+      }, a))));
+    };
+
+    await bulkStorageOperation(
+      async (arg) => {
+        return await bucket.upload(arg, { destination: getCloudPathForLocalPath(entity, arg) });
+      },
+      allFilesToUpload,
+      { concurrencyLimit: 10 }
+    )
+
+
+
+
+    let allFilesToUpload;
     try {
       // Note: GCS manages creation of parent directories if they do not exist.
       // So collecting path of only the files is good enough.
-      const allFilesToUpload = await getFileTreeRecursively(directory);
+      allFilesToUpload = await getFileTreeRecursively(directory);
 
       const limiter = createLimiter(10);
       const uploadPromises: Array<Promise<UploadResponse>> = [];
@@ -138,7 +169,7 @@ export class GoogleGCSPublish implements PublisherBase {
 
         // Rate limit the concurrent execution of file uploads to batches of 10 (per publish)
         const uploadFile = limiter(() =>
-          this.storageClient.bucket(this.bucketName).upload(sourceFilePath, {
+          bucket.upload(sourceFilePath, {
             destination,
           }),
         );
@@ -155,6 +186,11 @@ export class GoogleGCSPublish implements PublisherBase {
       this.logger.error(errorMessage);
       throw new Error(errorMessage);
     }
+
+    // Last, remove the files that were *only* present previously
+    const staleFiles = getStaleFiles(allFilesToUpload, existingFiles);
+
+    await removeFiles(staleFiles);
   }
 
   fetchTechDocsMetadata(entityName: EntityName): Promise<TechDocsMetadata> {

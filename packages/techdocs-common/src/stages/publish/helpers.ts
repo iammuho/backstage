@@ -13,7 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import { Entity } from '@backstage/catalog-model';
 import mime from 'mime-types';
+import path from 'path';
 import recursiveReadDir from 'recursive-readdir';
 
 /**
@@ -81,4 +83,36 @@ export const getFileTreeRecursively = async (
     throw new Error(`Failed to read template directory: ${error.message}`);
   });
   return fileList;
+};
+
+
+// Only returns the files that existed previously and are not present anymore.
+export const getStaleFiles = (
+  newFiles: string[],
+  oldFiles: string[],
+): string[] => {
+  const staleFiles = new Set(oldFiles);
+  newFiles.forEach(newFile => {
+    staleFiles.delete(newFile)
+  })
+  return Array.from(staleFiles)
+};
+
+// 
+export const getCloudPathForLocalPath = (entity: Entity, localPath: string): string => {
+  // Remove the absolute path prefix of the source directory
+  // Path of all files to upload, relative to the root of the source directory
+  // e.g. ['index.html', 'sub-page/index.html', 'assets/images/favicon.png']
+  const relativeFilePath = path.relative(directory, localPath);
+
+  // Convert destination file path to a POSIX path for uploading.
+  // GCS expects / as path separator and relativeFilePath will contain \\ on Windows.
+  // https://cloud.google.com/storage/docs/gsutil/addlhelp/HowSubdirectoriesWork
+  const relativeFilePathPosix = relativeFilePath
+    .split(path.sep)
+    .join(path.posix.sep);
+
+  // The / delimiter is intentional since it represents the cloud storage and not the local file system.
+  const entityRootDir = `${entity.metadata.namespace}/${entity.kind}/${entity.metadata.name}`;
+  return `${entityRootDir}/${relativeFilePathPosix}`; // GCS Bucket file relative path
 };
