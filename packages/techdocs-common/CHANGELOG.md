@@ -1,5 +1,15 @@
 # @backstage/techdocs-common
 
+## 0.6.8
+
+### Patch Changes
+
+- c18e8eb91: Provide optional `logger: Logger` and `logStream: Writable` arguments to the `GeneratorBase#run(...)` command.
+  They receive all log messages that are emitted during the generator run.
+- ae84b20cf: Revert the upgrade to `fs-extra@10.0.0` as that seemed to have broken all installs inexplicably.
+- Updated dependencies
+  - @backstage/backend-common@0.8.6
+
 ## 0.6.7
 
 ### Patch Changes
